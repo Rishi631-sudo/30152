@@ -1,0 +1,117 @@
+import streamlit as st
+import pandas as pd
+import backend_fin
+from datetime import date
+
+# Set the page configuration for a wider layout
+st.set_page_config(
+    page_title="Finance Tracker",
+    page_icon="💰",
+    layout="wide",
+)
+
+def main():
+    """
+    Main function to run the Streamlit application.
+    Manages the UI, user input, and calls to the backend.
+    """
+    st.title("💰 Finance: Revenue & Expense Tracker")
+
+    # Connect to the database
+    conn = backend_fin.connect_db()
+    if conn is None:
+        st.error("Could not connect to the database. Please check your connection details.")
+        return
+
+    # Ensure the table exists
+    backend_fin.create_table(conn)
+
+    # --- Section 1: Business Insights & Aggregations ---
+    st.header("Financial Overview")
+    aggregates = backend_fin.get_aggregates(conn)
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.metric(
+            label="Total Transactions",
+            value=aggregates.get("total_transactions", 0)
+        )
+    with col2:
+        st.metric(
+            label="Total Revenue",
+            value=f"${aggregates.get('total_revenue', 0):,.2f}",
+            delta=f"${aggregates.get('total_revenue', 0):,.2f}",
+            delta_color="normal"
+        )
+    with col3:
+        st.metric(
+            label="Total Expenses",
+            value=f"${aggregates.get('total_expenses', 0):,.2f}",
+            delta=f"${aggregates.get('total_expenses', 0):,.2f}",
+            delta_color="inverse"
+        )
+    with col4:
+        st.metric(
+            label="Net Income",
+            value=f"${aggregates.get('net_income', 0):,.2f}",
+            delta=f"${aggregates.get('net_income', 0):,.2f}",
+            delta_color="normal" if aggregates.get('net_income', 0) >= 0 else "inverse"
+        )
+
+    st.markdown("---")
+
+    # --- Section 2: CRUD - Add Transaction (Create) ---
+    st.header("Add a New Transaction")
+    with st.form(key='transaction_form'):
+        description = st.text_input("Description", help="e.g., Sales, Office Supplies")
+        amount = st.number_input("Amount", min_value=0.01, format="%.2f")
+        type_ = st.selectbox("Type", ["Revenue", "Expense"])
+        transaction_date = st.date_input("Date", value=date.today())
+        
+        submit_button = st.form_submit_button(label='Add Transaction')
+
+        if submit_button:
+            if description and amount:
+                success, message = backend_fin.insert_transaction(
+                    conn, description, amount, type_, transaction_date
+                )
+                if success:
+                    st.success(message)
+                else:
+                    st.error(message)
+            else:
+                st.error("Please enter a description and amount.")
+
+    st.markdown("---")
+
+    # --- Section 3: CRUD - View & Filter Transactions (Read) ---
+    st.header("All Transactions")
+
+    # Filtering and sorting options
+    col_filter, col_sort_by, col_sort_order = st.columns([1, 1, 1])
+    with col_filter:
+        selected_type = st.selectbox("Filter by Type", ["All", "Revenue", "Expense"])
+    with col_sort_by:
+        sort_by = st.selectbox("Sort by", ["", "amount", "transaction_date"])
+    with col_sort_order:
+        sort_order = st.selectbox("Order", ["ASC", "DESC"])
+
+    # Fetch and display transactions based on filters
+    transactions = backend_fin.get_transactions(conn, selected_type, sort_by, sort_order)
+
+    if transactions:
+        df = pd.DataFrame(transactions)
+        # Convert amount column to a more readable currency format for display
+        df['amount'] = df['amount'].apply(lambda x: f"${x:,.2f}")
+        
+        st.dataframe(df, use_container_width=True)
+    else:
+        st.info("No transactions to display.")
+
+    # Close the database connection when the app is done
+    conn.close()
+
+if __name__ == "__main__":
+    main()
+
